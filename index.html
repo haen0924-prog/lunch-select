@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>점심 메뉴 선택</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif;
+    background: #f5f7fa; color: #222; margin: 0; padding: 16px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; text-align: center; user-select: none; cursor: pointer; margin: 8px 0 20px; }
+  h2 { font-size: 1.15rem; margin: 20px 0 10px; }
+
+  /* 메뉴 카드 */
+  .menus { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .menu {
+    background: #fff; border: 3px solid transparent; border-radius: 12px;
+    overflow: hidden; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+  .menu.selected { border-color: #2f7de1; }
+  .menu .photo { position: relative; height: 120px; background: #e9edf3;
+    display: flex; align-items: center; justify-content: center; font-size: 44px; }
+  .menu .photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .menu .label { padding: 10px; text-align: center; font-weight: 600; }
+
+  /* 입력 & 버튼 */
+  .box { background: #fff; border-radius: 12px; padding: 16px; margin-top: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  input[type=text] { width: 100%; padding: 12px; font-size: 1rem; border: 1px solid #ccd; border-radius: 8px; }
+  button {
+    padding: 12px 18px; font-size: 1rem; border: none; border-radius: 8px;
+    background: #2f7de1; color: #fff; cursor: pointer;
+  }
+  button:disabled { background: #b9c3d1; cursor: not-allowed; }
+  button.secondary { background: #6b7685; }
+  button.danger { background: #d9534f; }
+  .submit-btn { width: 100%; margin-top: 12px; }
+  .msg { margin-top: 12px; text-align: center; font-weight: 600; color: #2a7a3b; min-height: 1.2em; }
+
+  /* 관리자 */
+  .admin-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .total-item { background: #fff; border-radius: 10px; padding: 14px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .total-item .count { font-size: 1.6rem; font-weight: 700; color: #2f7de1; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+  th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; font-size: .95rem; }
+  th { background: #f0f3f8; }
+  .small { font-size: .8rem; color: #777; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== 설정: 메뉴를 여기서 바꾸세요 ===== -->
+  <script>
+    // 관리자 비밀번호
+    const ADMIN_PASSWORD = "1234";
+
+    // 메뉴 목록 (id는 중복되지 않게, img는 사진 파일 경로 - 사진이 없으면 이모지가 보입니다)
+    const MENUS = [
+      { id: "m1", name: "들깨 닭곰탕", emoji: "🍲", img: "images/1.jpg" },
+      { id: "m2", name: "닭곰탕",      emoji: "🍲", img: "images/2.jpg" },
+      { id: "m3", name: "얼큰 닭개장", emoji: "🥘", img: "images/3.jpg" }
+    ];
+  </script>
+
+  <h1 id="title">🍱 오늘의 점심 메뉴 선택</h1>
+
+  <!-- ===== 메뉴 선택 화면 ===== -->
+  <div id="voteView">
+    <div class="menus" id="menuGrid"></div>
+
+    <div class="box">
+      <label for="nameInput"><strong>이름</strong></label>
+      <input type="text" id="nameInput" placeholder="이름을 입력하세요" style="margin-top:8px">
+      <button class="submit-btn" id="submitBtn" disabled>제출하기</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <!-- ===== 관리자 화면 ===== -->
+  <div id="adminView" class="hidden">
+    <div class="admin-bar">
+      <button class="secondary" id="backBtn">← 돌아가기</button>
+      <button id="csvBtn">엑셀(CSV) 저장</button>
+      <button class="danger" id="resetBtn">전체 초기화</button>
+    </div>
+
+    <h2>메뉴별 합계</h2>
+    <div class="totals" id="totals"></div>
+
+    <h2>제출 명단 <span class="small" id="totalCount"></span></h2>
+    <table>
+      <thead><tr><th>이름</th><th>메뉴</th><th>제출 시간</th><th></th></tr></thead>
+      <tbody id="listBody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+  const STORAGE_KEY = "lunchSubmissions";
+  let selectedId = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  // 안전하게 글자 넣기 (이름에 특수문자가 있어도 깨지지 않도록)
+  function esc(text) {
+    const d = document.createElement("div");
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  function loadData() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function saveData(list) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  }
+  function menuName(id) {
+    const m = MENUS.find(x => x.id === id);
+    return m ? m.name : "(알 수 없음)";
+  }
+
+  // ----- 메뉴 카드 그리기 -----
+  function renderMenus() {
+    $("menuGrid").innerHTML = MENUS.map(m => `
+      <div class="menu" data-id="${m.id}">
+        <div class="photo">
+          <span>${m.emoji}</span>
+          <img src="${m.img}" alt="${esc(m.name)}" onerror="this.remove()">
+        </div>
+        <div class="label">${esc(m.name)}</div>
+      </div>
+    `).join("");
+
+    document.querySelectorAll(".menu").forEach(card => {
+      card.addEventListener("click", () => {
+        selectedId = card.dataset.id;
+        document.querySelectorAll(".menu").forEach(c => c.classList.remove("selected"));
+        card.classList.add("selected");
+        updateSubmitState();
+      });
+    });
+  }
+
+  function updateSubmitState() {
+    const hasName = $("nameInput").value.trim() !== "";
+    $("submitBtn").disabled = !(hasName && selectedId);
+  }
+
+  // ----- 제출 -----
+  $("nameInput").addEventListener("input", updateSubmitState);
+
+  $("submitBtn").addEventListener("click", () => {
+    const name = $("nameInput").value.trim();
+    if (!name || !selectedId) return;
+
+    const list = loadData();
+    const entry = { name: name, menuId: selectedId, time: new Date().toLocaleString("ko-KR") };
+
+    // 같은 이름이 이미 있으면 새 선택으로 덮어쓰기
+    const idx = list.findIndex(x => x.name === name);
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+    saveData(list);
+
+    $("msg").textContent = `✅ ${name}님, '${menuName(selectedId)}' 제출 완료!`;
+
+    // 입력 초기화
+    $("nameInput").value = "";
+    selectedId = null;
+    document.querySelectorAll(".menu").forEach(c => c.classList.remove("selected"));
+    updateSubmitState();
+  });
+
+  // ----- 관리자 모드: 제목을 빠르게 5번 누르기 -----
+  let tapCount = 0;
+  let tapTimer = null;
+  $("title").addEventListener("click", () => {
+    tapCount++;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => { tapCount = 0; }, 2000); // 2초 안에 5번
+    if (tapCount >= 5) {
+      tapCount = 0;
+      const pw = prompt("관리자 비밀번호를 입력하세요");
+      if (pw === ADMIN_PASSWORD) showAdmin();
+      else if (pw !== null) alert("비밀번호가 틀렸습니다.");
+    }
+  });
+
+  function showAdmin() {
+    $("voteView").classList.add("hidden");
+    $("adminView").classList.remove("hidden");
+    renderAdmin();
+  }
+  function showVote() {
+    $("adminView").classList.add("hidden");
+    $("voteView").classList.remove("hidden");
+  }
+
+  function renderAdmin() {
+    const list = loadData();
+
+    // 메뉴별 합계
+    $("totals").innerHTML = MENUS.map(m => {
+      const count = list.filter(x => x.menuId === m.id).length;
+      return `<div class="total-item">
+        <div>${m.emoji} ${esc(m.name)}</div>
+        <div class="count">${count}</div>
+      </div>`;
+    }).join("");
+
+    $("totalCount").textContent = `(총 ${list.length}명)`;
+
+    // 명단
+    if (list.length === 0) {
+      $("listBody").innerHTML = `<tr><td colspan="4" class="small">아직 제출한 사람이 없습니다.</td></tr>`;
+      return;
+    }
+    $("listBody").innerHTML = list.map((x, i) => `
+      <tr>
+        <td>${esc(x.name)}</td>
+        <td>${esc(menuName(x.menuId))}</td>
+        <td class="small">${esc(x.time)}</td>
+        <td><button class="secondary" data-del="${i}" style="padding:4px 8px;font-size:.8rem">삭제</button></td>
+      </tr>
+    `).join("");
+
+    document.querySelectorAll("[data-del]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.del);
+        const current = loadData();
+        if (!confirm(`${current[idx].name}님의 선택을 삭제할까요?`)) return;
+        current.splice(idx, 1);
+        saveData(current);
+        renderAdmin();
+      });
+    });
+  }
+
+  // ----- 관리자 버튼들 -----
+  $("backBtn").addEventListener("click", showVote);
+
+  $("csvBtn").addEventListener("click", () => {
+    const list = loadData();
+    const rows = [["이름", "메뉴", "제출시간"]];
+    list.forEach(x => rows.push([x.name, menuName(x.menuId), x.time]));
+
+    // 메뉴별 합계도 같이 넣기
+    rows.push([]);
+    rows.push(["[메뉴별 합계]"]);
+    MENUS.forEach(m => {
+      rows.push([m.name, list.filter(x => x.menuId === m.id).length]);
+    });
+
+    const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "점심메뉴_" + new Date().toISOString().slice(0, 10) + ".csv";
+    a.click();
+  });
+
+  $("resetBtn").addEventListener("click", () => {
+    if (!confirm("모든 제출 기록을 삭제할까요? (되돌릴 수 없습니다)")) return;
+    localStorage.removeItem(STORAGE_KEY);
+    renderAdmin();
+  });
+
+  // ----- 시작 -----
+  renderMenus();
+  updateSubmitState();
+</script>
+</body>
+</html>
